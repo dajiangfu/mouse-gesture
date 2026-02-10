@@ -44,7 +44,7 @@
 
 克隆或下载本项目：
 
-git clone https://github.com/你的用户名/项目名.git
+https://github.com/dajiangfu/mouse-gesture.git
 
 
 打开浏览器扩展管理页面
