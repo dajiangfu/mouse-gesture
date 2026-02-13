@@ -1,8 +1,9 @@
-(() => {
+(async () => {
   const MOVE_THRESHOLD = 18;
   const ARM_THRESHOLD = 14;
   const MAX_DIR_LEN = 8;
-  const SHOW_TRAIL = true;
+  const DEFAULT_SHOW_TRAIL = true;
+  let showTrail = DEFAULT_SHOW_TRAIL;
 
   const DEFAULT_MAP = {
     D: "scrollDown",
@@ -19,7 +20,21 @@
     DRUL: "closeWindow"
   };
 
+  const DEFAULT_EXCLUDED_URLS = [];
   
+  async function loadShowTrail() {
+    if (!hasChromeApi() || !chrome.storage?.sync) {
+      showTrail = DEFAULT_SHOW_TRAIL;
+      return;
+    }
+    try {
+      const { showTrail: st } = await chrome.storage.sync.get({ showTrail: DEFAULT_SHOW_TRAIL });
+      showTrail = !!st;
+    } catch (_) {
+      showTrail = DEFAULT_SHOW_TRAIL;
+    }
+  }
+
   let hideHintTimer = null;
 
   const ACTION_LABELS_ZH = {
@@ -37,6 +52,19 @@
 	closeWindow: "关闭当前窗口",
     none: "无动作"
   };
+
+  await loadShowTrail();
+
+  // 实时响应设置变化
+  if (hasChromeApi() && chrome.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "sync") return;
+      if (changes.showTrail) {
+        showTrail = !!changes.showTrail.newValue;
+        if (!showTrail) destroyCanvas();
+      }
+    });
+  }
 
   function ensureHintEl() {
     let el = document.getElementById("__mg_gesture_hint");
@@ -151,6 +179,19 @@
   let canvas = null;
   let ctx = null;
 
+  // 轨迹样式（注意：canvas.width/height 变化会重置 ctx 状态，必须可重复设置）
+  const TRAIL_WIDTH = 4;
+  const TRAIL_COLOR = "#a020f0";
+
+  function applyTrailStyle() {
+    if (!ctx) return;
+    // 这些属性在 resize（改 canvas.width/height）后会被重置为默认值
+    ctx.lineWidth = TRAIL_WIDTH;
+    ctx.strokeStyle = TRAIL_COLOR;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+  }
+
   // 缓存手势映射：一次手势过程中只读一次 storage，避免 move 事件频繁 await
   let mapCache = DEFAULT_MAP;
   let mapLoaded = false;
@@ -161,6 +202,77 @@
       && chrome?.runtime?.sendMessage
       && chrome?.storage?.sync?.get;
   }
+
+  // 关闭窗口前确认（由 background 触发）
+  if (typeof chrome !== "undefined" && chrome?.runtime?.onMessage) {
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (msg && msg.type === "CONFIRM_CLOSE_WINDOW") {
+        const ok = window.confirm("即将关闭当前窗口，是否继续？");
+        sendResponse({ ok });
+        return; // confirm 是同步的
+      }
+    });
+  }
+
+
+  async function getExcludedUrlsSafe() {
+    if (!hasChromeApi()) return DEFAULT_EXCLUDED_URLS;
+    try {
+      const res = await chrome.storage.sync.get({ excludedUrls: DEFAULT_EXCLUDED_URLS });
+      const list = res?.excludedUrls;
+      return Array.isArray(list) ? list : DEFAULT_EXCLUDED_URLS;
+    } catch (_) {
+      return DEFAULT_EXCLUDED_URLS;
+    }
+  }
+
+  function wildcardToRegex(pattern) {
+    // 把 '*' 作为通配符，其余字符按字面匹配
+    const esc = String(pattern)
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+      .replace(/\*/g, ".*");
+    return new RegExp("^" + esc + "$", "i");
+  }
+
+  function isUrlExcluded(url, host, patterns) {
+    const u = String(url || "");
+    const h = String(host || "").toLowerCase();
+    for (const raw of patterns || []) {
+      const p = String(raw || "").trim();
+      if (!p || p.startsWith("#")) continue;
+
+      // 正则：re:...
+      if (p.startsWith("re:")) {
+        try {
+          const re = new RegExp(p.slice(3), "i");
+          if (re.test(u)) return true;
+        } catch (_) {}
+        continue;
+      }
+
+      // 纯域名：example.com（匹配子域）
+      if (!p.includes("*") && !p.includes("://") && !p.includes("/")) {
+        const d = p.toLowerCase();
+        if (h === d || h.endsWith("." + d)) return true;
+        continue;
+      }
+
+      // 通配符/URL 规则：匹配整条 URL
+      try {
+        const re = wildcardToRegex(p);
+        if (re.test(u)) return true;
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  // ✅若当前网址在排除列表里：不启用手势（不注册任何事件监听）
+  try {
+    const excluded = await getExcludedUrlsSafe();
+    if (excluded?.length && isUrlExcluded(location.href, location.hostname, excluded)) {
+      return;
+    }
+  } catch (_) {}
 
   async function getMapSafe() {
     if (!hasChromeApi()) return DEFAULT_MAP;
@@ -204,8 +316,7 @@
     `;
     document.documentElement.appendChild(canvas);
     ctx = canvas.getContext("2d");
-    ctx.lineWidth = 4; // 轨迹宽度
-    ctx.strokeStyle = "#a020f0";  // 轨迹颜色改成紫色，也可以用 "purple"
+    applyTrailStyle();
   }
 
   function destroyCanvas() {
@@ -218,6 +329,8 @@
     if (!canvas) return;
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    // ⚠️改 width/height 会重置 ctx 的 lineWidth/strokeStyle 等状态
+    applyTrailStyle();
   }
 
   function drawTrail() {
@@ -309,6 +422,9 @@
     if (e.button !== 2) return;
     if (isEditableTarget(e.target)) return;
 
+    // 清掉上一次残留的提示，避免下一次右键轻微抖动时弹出旧动作
+    hardHideGestureHint();
+
     tracking = true;
     startX = lastX = e.clientX;
     startY = lastY = e.clientY;
@@ -320,7 +436,7 @@
     // showGestureHint("右键手势：准备中…");
     loadMapForGesture();
 
-    if (SHOW_TRAIL) {
+    if (showTrail) {
       createCanvas();
       drawTrail();
     }
@@ -347,7 +463,8 @@
 
     // 实时提示（直到右键松开后自动消失）
     if (!movedEnough) {
-      showGestureHint("右键手势：准备中…", false);
+      // 未达到触发阈值时不显示提示，避免显示上一次的残留文本
+      hideGestureHint(0);
     } else {
       const g = getGestureString();
       const ga = toArrowGesture(g);
@@ -366,7 +483,7 @@
       }
     }
 
-    if (SHOW_TRAIL) drawTrail();
+    if (showTrail) drawTrail();
   }, true);
 
   window.addEventListener("mouseup", async (e) => {

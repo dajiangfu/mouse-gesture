@@ -13,6 +13,9 @@ const DEFAULT_MAP = {
   DRUL: "closeWindow"
 };
 
+const DEFAULT_CONFIRM_CLOSE_WINDOW = true;
+const DEFAULT_SHOW_TRAIL = true;
+
 const ACTIONS = [
   ["none", "无动作"],
   ["scrollDown", "向下滚动"],
@@ -32,6 +35,9 @@ const ACTIONS = [
 
 const tbody = document.getElementById("tbody");
 const statusEl = document.getElementById("status");
+const excludedEl = document.getElementById("excludedUrls");
+const confirmEl = document.getElementById("confirmCloseWindow");
+const trailEl = document.getElementById("showTrail");
 
 function setStatus(t) {
   statusEl.textContent = t || "";
@@ -65,7 +71,12 @@ function rowTemplate(gesture, action) {
 }
 
 async function load() {
-  const { gestureMap } = await chrome.storage.sync.get({ gestureMap: DEFAULT_MAP });
+  const { gestureMap, excludedUrls, confirmCloseWindow, showTrail } = await chrome.storage.sync.get({
+    gestureMap: DEFAULT_MAP,
+    excludedUrls: [],
+    confirmCloseWindow: DEFAULT_CONFIRM_CLOSE_WINDOW,
+    showTrail: DEFAULT_SHOW_TRAIL
+  });
   tbody.innerHTML = "";
 
   // 展示已有项
@@ -79,6 +90,12 @@ async function load() {
     const { tr } = rowTemplate("", "none");
     tbody.appendChild(tr);
   }
+
+  // 排除网址
+  const lines = Array.isArray(excludedUrls) ? excludedUrls : [];
+  excludedEl.value = lines.join("\n");
+  if (confirmEl) confirmEl.checked = !!confirmCloseWindow;
+  if (trailEl) trailEl.checked = !!showTrail;
 }
 
 function collect() {
@@ -96,16 +113,141 @@ function collect() {
   return map;
 }
 
+function collectExcluded() {
+  const raw = (excludedEl.value || "").split(/\r?\n/);
+  const list = [];
+  for (const line of raw) {
+    const s = String(line || "").trim();
+    if (!s) continue;
+    if (s.startsWith("#")) continue;
+    list.push(s);
+  }
+  return list;
+}
+
 document.getElementById("btnSave").addEventListener("click", async () => {
   const map = collect();
-  await chrome.storage.sync.set({ gestureMap: map });
+  const excludedUrls = collectExcluded();
+  const confirmCloseWindow = confirmEl ? !!confirmEl.checked : DEFAULT_CONFIRM_CLOSE_WINDOW;
+  const showTrail = trailEl ? !!trailEl.checked : DEFAULT_SHOW_TRAIL;
+  await chrome.storage.sync.set({ gestureMap: map, excludedUrls, confirmCloseWindow, showTrail });
   setStatus("Saved.");
 });
 
 document.getElementById("btnReset").addEventListener("click", async () => {
-  await chrome.storage.sync.set({ gestureMap: DEFAULT_MAP });
+  await chrome.storage.sync.set({ gestureMap: DEFAULT_MAP, excludedUrls: [], confirmCloseWindow: DEFAULT_CONFIRM_CLOSE_WINDOW, showTrail: DEFAULT_SHOW_TRAIL });
   await load();
   setStatus("Reset.");
 });
+
+async function exportConfig() {
+  const data = await chrome.storage.sync.get({
+    gestureMap: DEFAULT_MAP,
+    excludedUrls: [],
+    confirmCloseWindow: DEFAULT_CONFIRM_CLOSE_WINDOW,
+    showTrail: DEFAULT_SHOW_TRAIL
+  });
+
+  const payload = {
+    schema: 1,
+    exportedAt: new Date().toISOString(),
+    gestureMap: data.gestureMap || DEFAULT_MAP,
+    excludedUrls: Array.isArray(data.excludedUrls) ? data.excludedUrls : [],
+    confirmCloseWindow: data.confirmCloseWindow ?? DEFAULT_CONFIRM_CLOSE_WINDOW,
+    showTrail: data.showTrail ?? DEFAULT_SHOW_TRAIL
+  };
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "mouse-gesture-config.json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function importConfigFromText(text) {
+  let obj;
+  try {
+    obj = JSON.parse(text);
+  } catch (e) {
+    throw new Error("文件不是有效的 JSON。");
+  }
+
+  const map = obj?.gestureMap;
+  const excluded = obj?.excludedUrls;
+  let confirmCloseWindow = obj?.confirmCloseWindow;
+  let showTrail = obj?.showTrail;
+
+  // 兼容导入时被序列化成字符串/数字的情况
+  if (typeof confirmCloseWindow === "string") {
+    const v = confirmCloseWindow.trim().toLowerCase();
+    if (v === "true") confirmCloseWindow = true;
+    else if (v === "false") confirmCloseWindow = false;
+  }
+  if (typeof confirmCloseWindow === "number") confirmCloseWindow = !!confirmCloseWindow;
+
+  if (typeof showTrail === "string") {
+    const v = showTrail.trim().toLowerCase();
+    if (v === "true") showTrail = true;
+    else if (v === "false") showTrail = false;
+  }
+  if (typeof showTrail === "number") showTrail = !!showTrail;
+
+  if (!map || typeof map !== "object" || Array.isArray(map)) {
+    throw new Error("配置缺少 gestureMap 或格式不正确。");
+  }
+
+  const cleanedMap = {};
+  for (const [k, v] of Object.entries(map)) {
+    const g = String(k || "").trim().toUpperCase();
+    if (!/^[LRUD]{1,8}$/.test(g)) continue;
+    cleanedMap[g] = String(v || "none");
+  }
+
+  const cleanedExcluded = Array.isArray(excluded)
+    ? excluded.map(s => String(s || "").trim()).filter(Boolean)
+    : [];
+
+  await chrome.storage.sync.set({
+    gestureMap: cleanedMap,
+    excludedUrls: cleanedExcluded,
+    confirmCloseWindow: confirmCloseWindow ?? DEFAULT_CONFIRM_CLOSE_WINDOW,
+    showTrail: showTrail ?? DEFAULT_SHOW_TRAIL
+  });
+  await load();
+}
+
+document.getElementById("btnExport").addEventListener("click", async () => {
+  try {
+    await exportConfig();
+    setStatus("Exported.");
+  } catch (e) {
+    console.error(e);
+    setStatus("Export failed.");
+  }
+});
+
+const importFileEl = document.getElementById("importFile");
+document.getElementById("btnImport").addEventListener("click", () => {
+  importFileEl.value = "";
+  importFileEl.click();
+});
+
+importFileEl.addEventListener("change", async () => {
+  const file = importFileEl.files && importFileEl.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    await importConfigFromText(text);
+    setStatus("Imported.");
+  } catch (e) {
+    console.error(e);
+    setStatus(e?.message || "Import failed.");
+  }
+});
+
 
 load();

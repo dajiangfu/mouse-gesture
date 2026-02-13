@@ -3,41 +3,232 @@
 <head>
   <meta charset="utf-8" />
   <title>鼠标手势设置</title>
-  <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding: 16px; }
-    table { border-collapse: collapse; width: 100%; max-width: 720px; }
-    th, td { border: 1px solid #ddd; padding: 8px; }
-    input { width: 120px; }
-    select { width: 180px; }
-    .row { display:flex; gap: 8px; margin: 12px 0; align-items:center; }
-    button { padding: 6px 10px; }
-    .hint { color: #666; font-size: 13px; margin-top: 8px; }
-    code { background:#f6f6f6; padding: 2px 6px; border-radius: 6px; }
+    <style>
+    :root{
+      --bg: #f1f3f4;          /* Chrome settings-like page background */
+      --card: #ffffff;        /* card surface */
+      --text: #202124;        /* primary text */
+      --muted: #5f6368;       /* secondary text */
+      --border: #e0e0e0;      /* subtle borders */
+      --shadow: 0 1px 2px rgba(60,64,67,.15), 0 1px 3px 1px rgba(60,64,67,.1);
+      --radius: 12px;
+      --focus: #1a73e8;       /* Google blue */
+    }
+
+    *{ box-sizing: border-box; }
+
+    body{
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      color: var(--text);
+      background: var(--bg);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center; /* horizontal center */
+      align-items: flex-start; /* top aligned like settings; looks better for long pages */
+      padding: 16px 12px;
+    }
+
+    .page{
+      width: 100%;
+      max-width: 800px;
+    }
+
+    .card{
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 10px 10px 8px;
+    }
+
+    .card + .card{ margin-top: 14px; }
+
+    h2{
+      margin: 0 0 12px;
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    h3{
+      margin: 0 0 10px;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .row{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin: 0 0 10px;
+    }
+
+    button{
+      appearance: none;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      transition: box-shadow .12s ease, border-color .12s ease, transform .02s ease;
+    }
+    button:hover{
+      box-shadow: 0 1px 2px rgba(60,64,67,.18);
+      border-color: #d2d2d2;
+    }
+    button:active{ transform: translateY(1px); }
+    button:focus-visible{
+      outline: 3px solid rgba(26,115,232,.25);
+      outline-offset: 2px;
+      border-color: var(--focus);
+    }
+
+    #status{
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    table{
+      border-collapse: separate;
+      border-spacing: 0;
+      width: 100%;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #fff;
+    }
+
+    th, td{
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+      font-size: 14px;
+    }
+
+    th{
+      text-align: left;
+      color: var(--muted);
+      font-weight: 600;
+      background: #fafafa;
+    }
+
+    tr:last-child td{ border-bottom: 0; }
+
+    input, select, textarea{
+      font: inherit;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 5px 8px;
+      background: #fff;
+      outline: none;
+    }
+
+    input:focus, select:focus, textarea:focus{
+      border-color: var(--focus);
+      box-shadow: 0 0 0 3px rgba(26,115,232,.15);
+    }
+
+    input{ width: 140px; }
+    select{ width: 220px; }
+
+    textarea{
+      width: 100%;
+      height: 150px;
+      resize: vertical;
+    }
+
+    .hint{
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 10px;
+      line-height: 1.5;
+    }
+
+    code{
+      background: #f6f6f6;
+      padding: 2px 6px;
+      border-radius: 8px;
+      border: 1px solid #eee;
+    }
+
+    /* Make it look nice on narrow screens */
+    @media (max-width: 520px){
+      input, select{ width: 100%; }
+      .row{ align-items: stretch; }
+      button{ width: 100%; justify-content: center; }
+    }
+    
+    .checkbox-inline{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--muted);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    
+    .checkbox-inline input{
+      width: 16px;
+      height: 16px;
+    }
   </style>
 </head>
 <body>
-  <h2>右键鼠标手势</h2>
+  <div class="page">
+    <div class="card">
+      <h2>鼠标右键手势</h2>
 
-  <div class="row">
-    <button id="btnReset">恢复默认</button>
-    <button id="btnSave">保存</button>
-    <span id="status"></span>
+      <div class="row">
+        <button id="btnReset">恢复默认</button>
+        <button id="btnSave">保存</button>
+        <button id="btnExport">导出配置</button>
+        <button id="btnImport">导入配置</button>
+        <input id="importFile" type="file" accept="application/json" style="display:none" />
+        <label class="checkbox-inline">
+          <input type="checkbox" id="confirmCloseWindow" />
+          关闭窗口弹出确认提示
+        </label>
+        <label class="checkbox-inline">
+          <input type="checkbox" id="showTrail" />
+          显示手势轨迹
+        </label>
+
+        <span id="status"></span>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>手势</th>
+            <th>动作</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+
+      <div class="hint">
+        手势说明：U(上)、D(下)、L(左)、R(右)，只识别上下左右
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>排除网址（不启用鼠标手势）</h3>
+      <div class="hint" style="margin: 0 0 10px;">
+        每行一个规则。支持：
+        <code>example.com</code>（匹配该域名及其子域）
+        、通配符 <code>*</code>（例如 <code>*://*.example.com/*</code>）
+        、或正则 <code>re:</code>（例如 <code>re:^https?://(www\.)?example\.com/</code>）。
+      </div>
+      <textarea id="excludedUrls"></textarea>
+    </div>
+
+    <script src="options.js"></script>
   </div>
-
-  <table>
-    <thead>
-      <tr>
-        <th>手势</th>
-        <th>动作</th>
-      </tr>
-    </thead>
-    <tbody id="tbody"></tbody>
-  </table>
-
-  <div class="hint">
-    手势说明：U(上)、D(下)、L(左)、R(右)，只识别上下左右
-  </div>
-
-  <script src="options.js"></script>
 </body>
 </html>
